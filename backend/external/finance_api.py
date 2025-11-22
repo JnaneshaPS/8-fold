@@ -29,16 +29,18 @@ def _get_alpha_key() -> str:
 async def fetch_daily_series(
     symbol: str,
     *,
-    function: str = "TIME_SERIES_DAILY_ADJUSTED",
+    function: str = "TIME_SERIES_DAILY",
     timeout: float = 10.0,
 ) -> dict[str, Any]:
     """
     Call Alpha Vantage for daily time series. Returns raw JSON response.
+    Uses TIME_SERIES_DAILY (free tier) instead of TIME_SERIES_DAILY_ADJUSTED (premium).
     """
     params = {
         "function": function,
         "symbol": symbol,
         "apikey": _get_alpha_key(),
+        "outputsize": "compact",
     }
 
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -53,8 +55,9 @@ async def fetch_daily_series(
         if "Error Message" in data:
             raise FinanceAPIError(f"Alpha Vantage error: {data['Error Message']}")
         if "Note" in data:
-            # Usually rate limits / quota
             raise FinanceAPIError(f"Alpha Vantage note (likely rate limit): {data['Note']}")
+        if "Information" in data:
+            raise FinanceAPIError(f"Alpha Vantage info: {data['Information']}")
 
         return data
 
@@ -64,6 +67,7 @@ def extract_daily_closing_prices(
 ) -> list[Tuple[str, float]]:
     """
     Given Alpha Vantage response, extract [(date, close_price)] sorted ascending.
+    Works with both TIME_SERIES_DAILY and TIME_SERIES_DAILY_ADJUSTED.
     """
     time_series_key = next(
         (k for k in data.keys() if "Time Series" in k),
@@ -80,6 +84,7 @@ def extract_daily_closing_prices(
             ohlc.get("4. close")
             or ohlc.get("5. adjusted close")
             or ohlc.get("4. Close")
+            or ohlc.get("5. Adjusted Close")
         )
         if close_str is None:
             continue
@@ -89,7 +94,6 @@ def extract_daily_closing_prices(
             continue
         rows.append((date_str, close_val))
 
-    # Sort oldest → newest
     rows.sort(key=lambda r: r[0])
     return rows
 

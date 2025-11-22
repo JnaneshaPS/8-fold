@@ -68,14 +68,12 @@ def extract_linkedin_profile_image_src(html: str) -> Optional[str]:
 
     for button in soup.find_all("button"):
         class_str = " ".join(button.get("class") or [])
-        if "pv-top-card-profile-picture__container" not in class_str:
-            continue
-        img = button.find("img")
-        if not img:
-            continue
-        src = img.get("src")
-        if src and LINKEDIN_MEDIA_HOST in src:
-            candidates.append(src)
+        if "pv-top-card-profile-picture__container" in class_str:
+            img = button.find("img")
+            if img:
+                src = img.get("src")
+                if src and LINKEDIN_MEDIA_HOST in src:
+                    candidates.append(src)
 
     if not candidates:
         for img in soup.find_all("img"):
@@ -84,8 +82,8 @@ def extract_linkedin_profile_image_src(html: str) -> Optional[str]:
                 continue
 
             classes = " ".join(img.get("class") or [])
-            title = img.get("title", "")
             alt = img.get("alt", "")
+            title = img.get("title", "")
 
             if any(
                 hint in classes
@@ -93,13 +91,19 @@ def extract_linkedin_profile_image_src(html: str) -> Optional[str]:
                     "pv-top-card-profile-picture__image",
                     "EntityPhoto-circle",
                     "profile-displayphoto",
+                    "evi-image",
                 ]
             ):
                 candidates.append(src)
                 continue
 
-            if re.search(r"\s", title) or re.search(r"\s", alt):
+            if "profile-displayphoto" in src or "displayphoto" in src:
                 candidates.append(src)
+                continue
+
+            if (alt and len(alt) > 2) or (title and len(title) > 2):
+                if "profile" in classes.lower() or "photo" in classes.lower():
+                    candidates.append(src)
 
     return candidates[0] if candidates else None
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date as DateType
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -12,7 +12,7 @@ from backend.external.finance_api import fetch_daily_price_series
 class StockPoint(BaseModel):
     """Single point on the stock price chart."""
 
-    date: date = Field(description="Trading day (UTC)")
+    date: DateType = Field(description="Trading day (UTC)")
     close: float = Field(description="Daily close price in quote currency")
 
 
@@ -46,7 +46,7 @@ def get_stock_series(
 
     points = [
         StockPoint(
-            date=date.fromisoformat(p["date"]),
+            date=DateType.fromisoformat(p["date"]),
             close=float(p["close"]),
         )
         for p in raw
