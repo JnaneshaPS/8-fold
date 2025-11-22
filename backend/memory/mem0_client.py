@@ -6,14 +6,11 @@ from typing import Any, Mapping, Sequence
 
 from mem0 import MemoryClient
 
-MEM0_API_KEY = os.getenv("MEM0_API_KEY")
-
-
 @lru_cache(maxsize=1)
 def get_mem0_client() -> MemoryClient:
-    api_key = os.getenv(MEM0_API_KEY)
+    api_key = os.getenv("MEM0_API_KEY")
     if not api_key:
-        raise RuntimeError(f"{MEM0_API_KEY} is not set in environment/.env")
+        raise RuntimeError("MEM0_API_KEY is not set in environment/.env")
     return MemoryClient(api_key=api_key)
 
 
@@ -31,10 +28,7 @@ def search_memory(
     query: str,
     *,
     user_id: str,
-    limit: int | None = None,
+    limit: int = 5,
 ) -> dict[str, Any]:
     client = get_mem0_client()
-    filters: dict[str, Any] = {"user_id": user_id}
-    if limit is not None:
-        filters["limit"] = limit
-    return client.search(query, filters=filters)
+    return client.search(query, filters={"user_id": user_id}, limit=limit)

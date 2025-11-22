@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from agents import Agent, Runner, function_tool
+from agents import Agent, Runner, function_tool, ModelSettings
 from pydantic import BaseModel, Field
 
 from backend.agents.fundamentals import (
@@ -90,6 +90,7 @@ Always return structured data that can be assembled into a report.
         return Agent(
             name="Research Orchestrator",
             instructions=instructions,
+            model="gpt-5.1",
             tools=[
                 fundamentals_tool,
                 leadership_tool,
@@ -223,6 +224,7 @@ Always return structured data that can be assembled into a report.
 class ChatOrchestrator:
     def __init__(self, context: SessionContext):
         self.context = context
+        self.conversation_history: List[Dict[str, str]] = []
         self.agent = self._build_chat_agent()
 
     def _build_chat_agent(self) -> Agent[SessionContext]:
@@ -235,19 +237,21 @@ Role: {ctx.context.persona.role}
 Company: {ctx.context.persona.company}
 """
 
-            recent_memories = search_memory(
-                query="recent conversations and research",
-                user_id=ctx.context.user_id,
-                limit=5,
-            )
-
             memory_context = ""
-            if recent_memories and "results" in recent_memories:
-                memories = recent_memories["results"]
-                if memories:
-                    memory_context = "\n".join(
-                        [f"- {m.get('memory', '')}" for m in memories[:3]]
-                    )
+            try:
+                recent_memories = search_memory(
+                    query="recent conversations and research",
+                    user_id=ctx.context.user_id,
+                    limit=5,
+                )
+                if recent_memories and "results" in recent_memories:
+                    memories = recent_memories["results"]
+                    if memories:
+                        memory_context = "\n".join(
+                            [f"- {m.get('memory', '')}" for m in memories[:3]]
+                        )
+            except Exception:
+                pass
 
             return f"""
 You are a helpful B2B research assistant in Chat Mode.
@@ -270,19 +274,27 @@ suggest they use Research Mode for a complete structured report.
         return Agent(
             name="Chat Assistant",
             instructions=dynamic_instructions,
+            model="gpt-5.1",
             tools=[],
         )
 
     async def chat(self, message: str) -> str:
+        self.conversation_history.append({"role": "user", "content": message})
+        
+        input_for_agent = self.conversation_history if len(self.conversation_history) > 1 else message
+        
         result = await Runner.run(
             self.agent,
-            message,
+            input_for_agent,
             context=self.context,
         )
 
-        await self._save_chat_to_memory(message, result.final_output)
+        assistant_response = result.final_output
+        self.conversation_history.append({"role": "assistant", "content": assistant_response})
+        
+        await self._save_chat_to_memory(message, assistant_response)
 
-        return result.final_output
+        return assistant_response
 
     async def _save_chat_to_memory(self, user_message: str, assistant_response: str):
         add_memory(

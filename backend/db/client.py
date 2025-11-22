@@ -22,6 +22,11 @@ if not DATABASE_URL:
         "Set it to your Neon Postgres connection string."
     )
 
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+elif not DATABASE_URL.startswith("postgresql+"):
+    DATABASE_URL = f"postgresql+psycopg://{DATABASE_URL.split('://')[-1]}"
+
 engine = create_engine(
     DATABASE_URL,
     echo=False,
