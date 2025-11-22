@@ -8,7 +8,6 @@ from backend.agents.fundamentals import (
 from backend.agents.leadership import (
     leadership_tool,
     fetch_leadership,
-    enrich_leadership_with_images,
     LeadershipSummary,
     Leader,
 )
@@ -50,7 +49,6 @@ __all__ = [
     "KeyNumbers",
     "leadership_tool",
     "fetch_leadership",
-    "enrich_leadership_with_images",
     "LeadershipSummary",
     "Leader",
     "market_news_tool",

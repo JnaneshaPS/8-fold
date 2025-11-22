@@ -32,7 +32,7 @@ class StockSeries(BaseModel):
     )
 
 
-def get_stock_series(
+async def get_stock_series(
     symbol: str,
     company_name: Optional[str] = None,
     days: int = 365,
@@ -42,7 +42,7 @@ def get_stock_series(
 
     The finance client is responsible for talking to AlphaVantage / Finnhub etc.
     """
-    raw = fetch_daily_price_series(symbol=symbol, days=days)
+    raw = await fetch_daily_price_series(symbol=symbol, days=days)
 
     points = [
         StockPoint(
@@ -61,7 +61,7 @@ def get_stock_series(
 
 
 @function_tool
-def stock_visualization_tool(
+async def stock_visualization_tool(
     symbol: str,
     company_name: Optional[str] = None,
     days: int = 365,
@@ -77,7 +77,7 @@ def stock_visualization_tool(
     Returns:
         JSON string matching StockSeries.
     """
-    series = get_stock_series(
+    series = await get_stock_series(
         symbol=symbol,
         company_name=company_name,
         days=days,

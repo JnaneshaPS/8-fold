@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 from agents import function_tool
 
 from backend.external.perplexity import ask_structured_perplexity
-from backend.utils.scrapper import get_linkedin_profile_image_url
 
 
 class Leader(BaseModel):
@@ -78,38 +77,6 @@ Return ONLY a JSON object matching the LeadershipSummary schema. No extra text.
     return ask_structured_perplexity(prompt, LeadershipSummary)
 
 
-async def enrich_leadership_with_images(
-    summary: LeadershipSummary,
-    *,
-    timeout: float = 10.0,
-    max_leaders: int = 3,
-) -> LeadershipSummary:
-    """
-    Given a LeadershipSummary (with linkedin_url fields), fetch LinkedIn HTML
-    and fill image_url for the first few leaders that have a LinkedIn URL.
-
-    This is an async helper that you should call from your orchestrator.
-    """
-
-    # Work on a copy so we don't mutate original unintendedly
-    updated = summary.model_copy(deep=True)
-
-    # Only try for first N leaders to avoid hammering LinkedIn
-    for leader in updated.leaders[:max_leaders]:
-        if not leader.linkedin_url:
-            continue
-
-        try:
-            img = await get_linkedin_profile_image_url(
-                leader.linkedin_url,
-                timeout=timeout,
-            )
-        except Exception:
-            img = None
-
-        leader.image_url = img
-
-    return updated
 
 
 @function_tool
@@ -118,11 +85,7 @@ def leadership_tool(
     website: Optional[str] = None,
 ) -> str:
     """
-    Tool wrapper for the LLM / orchestrator.
-
-    NOTE: This tool only calls Perplexity and does NOT perform HTML scraping,
-    so image_url will generally be null. To enrich image_url, call
-    `enrich_leadership_with_images` from Python after this tool returns.
+    Fetch leadership information for a company.
 
     Args:
         company_name: Name of the company.

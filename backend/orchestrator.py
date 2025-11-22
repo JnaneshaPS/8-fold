@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from agents import Agent, Runner, function_tool, ModelSettings
+from agents import Agent, Runner, function_tool, ModelSettings, RunContextWrapper
 from pydantic import BaseModel, Field
 
 from backend.agents.fundamentals import (
@@ -15,7 +15,6 @@ from backend.agents.fundamentals import (
 )
 from backend.agents.leadership import (
     leadership_tool,
-    enrich_leadership_with_images,
     fetch_leadership,
     LeadershipSummary,
 )
@@ -57,6 +56,65 @@ class SessionContext:
     persona: Optional[PersonaRead] = None
 
 
+@function_tool(name_override="memory_lookup")
+def memory_lookup_tool(
+    ctx: RunContextWrapper[SessionContext],
+    query: str,
+    limit: int = 5,
+    persona_only: bool = True,
+) -> str:
+    """
+    Search the Mem0 store for past research, comparisons, or chats.
+
+    Args:
+        query: Natural language description of what to retrieve.
+        limit: Maximum number of results to return.
+        persona_only: Restrict results to the active persona when available.
+    """
+
+    user_id = ctx.context.user_id
+    persona_id = (
+        str(ctx.context.persona_id) if ctx.context.persona_id is not None else None
+    )
+
+    try:
+        results = search_memory(query=query, user_id=user_id, limit=limit)
+    except Exception as exc:  # pragma: no cover - best effort
+        return f"Unable to read memory: {exc}"
+
+    entries = results.get("results", []) if isinstance(results, dict) else []
+    lines: list[str] = []
+    for entry in entries:
+        memory_text = entry.get("memory") or entry.get("text") or ""
+        metadata = entry.get("metadata") or {}
+
+        if persona_only and persona_id:
+            if str(metadata.get("persona_id")) != persona_id:
+                continue
+
+        meta_bits: list[str] = []
+        if metadata.get("company_name"):
+            meta_bits.append(f"company={metadata['company_name']}")
+        if metadata.get("mode"):
+            meta_bits.append(f"mode={metadata['mode']}")
+        if metadata.get("research_type"):
+            meta_bits.append(f"research={metadata['research_type']}")
+        if metadata.get("comparison_pair"):
+            meta_bits.append(f"compare={metadata['comparison_pair']}")
+
+        summary = memory_text.strip()
+        if meta_bits:
+            summary = f"{summary} [{' | '.join(meta_bits)}]"
+
+        if summary:
+            lines.append(summary)
+
+    if not lines:
+        return "No relevant memories found."
+
+    return "\n".join(lines[:limit])
+
+
 class FullResearchReport(BaseModel):
     fundamentals: CompanyFundamentals
     leadership: LeadershipSummary
@@ -76,21 +134,19 @@ class ResearchOrchestrator:
 You are the Research Orchestrator for deep company research.
 
 Your job is to coordinate specialized tools to build a comprehensive research report:
-1. Use fundamentals_tool to get company profile and key numbers
-2. Use leadership_tool to identify key decision makers
-3. Use market_news_tool to understand recent developments
-4. Use tech_services_tool to understand products and tech stack
-5. Use persona_strategy_tool to generate persona-specific insights
-6. Optionally use stock_visualization_tool if company is public
+1. Call fundamentals_tool with the company name first
+2. Call leadership_tool, market_news_tool, and tech_services_tool 
+3. Call persona_strategy_tool with all gathered data to generate personalized insights
+4. If the company is public with a stock ticker, call stock_visualization_tool
 
-Call tools in logical order and pass information between them as needed.
-Always return structured data that can be assembled into a report.
+Return all results in the FullResearchReport format with all required fields populated.
 """
 
         return Agent(
             name="Research Orchestrator",
             instructions=instructions,
             model="gpt-5.1",
+            output_type=FullResearchReport,
             tools=[
                 fundamentals_tool,
                 leadership_tool,
@@ -111,72 +167,14 @@ Always return structured data that can be assembled into a report.
         if not self.context.persona:
             raise ValueError("Persona must be set in context before running research")
 
-        fundamentals = fetch_company_fundamentals(
-            company_name=company_name,
-            website=website,
-            region_hint=region_hint,
-        )
+        query = f"Research {company_name}"
+        if website:
+            query += f" (website: {website})"
+        if region_hint:
+            query += f" in {region_hint}"
 
-        leadership = fetch_leadership(
-            company_name=fundamentals.profile.company_name,
-            website=fundamentals.profile.website,
-        )
-
-        leadership = await enrich_leadership_with_images(
-            leadership,
-            max_leaders=3,
-            timeout=10.0,
-        )
-
-        news = fetch_market_news(
-            company_name=fundamentals.profile.company_name,
-            website=fundamentals.profile.website,
-            max_items=6,
-        )
-
-        tech = fetch_tech_and_services(
-            company_name=fundamentals.profile.company_name,
-            website=fundamentals.profile.website,
-        )
-
-        persona_ctx = PersonaContext(
-            id=str(self.context.persona.id),
-            name=self.context.persona.name,
-            role=self.context.persona.role or "Unknown",
-            company=self.context.persona.company or "Unknown",
-            region=self.context.persona.region,
-            focus_notes=self.context.persona.notes,
-        )
-
-        strategy = build_persona_strategy(
-            persona=persona_ctx,
-            fundamentals=fundamentals,
-            news=news,
-            tech=tech,
-        )
-
-        stock = None
-        if (
-            fundamentals.profile.public_status == "public"
-            and fundamentals.profile.stock_ticker
-        ):
-            try:
-                stock = get_stock_series(
-                    symbol=fundamentals.profile.stock_ticker,
-                    company_name=fundamentals.profile.company_name,
-                    days=365,
-                )
-            except Exception:
-                stock = None
-
-        report = FullResearchReport(
-            fundamentals=fundamentals,
-            leadership=leadership,
-            news=news,
-            tech_services=tech,
-            strategy=strategy,
-            stock=stock,
-        )
+        result = await Runner.run(self.agent, query, context=self.context)
+        report = result.final_output_as(FullResearchReport)
 
         if save_to_db:
             await self._save_report_to_db(report)
@@ -266,6 +264,8 @@ You can:
 - Provide quick summaries and insights
 - Help users understand their research targets
 - Suggest when to run a full Research Mode report
+- Call the memory_lookup tool whenever you need details from past research,
+  comparisons, or previous conversations for this persona.
 
 Be conversational, helpful, and concise. If the user asks for deep research on a company,
 suggest they use Research Mode for a complete structured report.
@@ -275,7 +275,7 @@ suggest they use Research Mode for a complete structured report.
             name="Chat Assistant",
             instructions=dynamic_instructions,
             model="gpt-5.1",
-            tools=[],
+            tools=[memory_lookup_tool],
         )
 
     async def chat(self, message: str) -> str:
@@ -297,17 +297,23 @@ suggest they use Research Mode for a complete structured report.
         return assistant_response
 
     async def _save_chat_to_memory(self, user_message: str, assistant_response: str):
+        metadata: dict[str, Any] = {"mode": "chat"}
+        if self.context.persona_id:
+            metadata["persona_id"] = str(self.context.persona_id)
+
         add_memory(
             messages=[
                 {"role": "user", "content": user_message},
                 {"role": "assistant", "content": assistant_response},
             ],
             user_id=self.context.user_id,
-            metadata={"mode": "chat"},
+            metadata=metadata,
         )
 
 
 class CompareResult(BaseModel):
+    company_a_name: str
+    company_b_name: str
     company_a: Dict[str, Any]
     company_b: Dict[str, Any]
     comparison_summary: str
@@ -349,7 +355,9 @@ class CompareOrchestrator:
         risks_a = [risk.risk for risk in report_a.strategy.risks_blockers[:3]]
         risks_b = [risk.risk for risk in report_b.strategy.risks_blockers[:3]]
 
-        return CompareResult(
+        result = CompareResult(
+            company_a_name=company_a,
+            company_b_name=company_b,
             company_a={
                 "name": company_a,
                 "profile": report_a.fundamentals.profile.model_dump(),
@@ -373,6 +381,15 @@ class CompareOrchestrator:
                 f"{company_b}: {', '.join(risks_b)}",
             ],
         )
+
+        await self._save_comparison_to_memory(
+            company_a=company_a,
+            company_b=company_b,
+            summary=comparison_summary,
+            recommendation=recommendation,
+        )
+
+        return result
 
     async def _get_or_create_report(
         self, company_name: str, use_cached: bool
@@ -439,6 +456,36 @@ Status: {profile_a.public_status} vs {profile_b.public_status}
             reason = f"Lower risk profile ({risks_b_count} vs {risks_a_count} blockers)"
 
         return f"Priority: {priority}. {reason}"
+
+    async def _save_comparison_to_memory(
+        self,
+        *,
+        company_a: str,
+        company_b: str,
+        summary: str,
+        recommendation: str,
+    ) -> None:
+        metadata: dict[str, Any] = {
+            "mode": "compare",
+            "comparison_pair": f"{company_a} vs {company_b}",
+        }
+        if self.context.persona_id:
+            metadata["persona_id"] = str(self.context.persona_id)
+
+        add_memory(
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"Compare {company_a} vs {company_b}",
+                },
+                {
+                    "role": "assistant",
+                    "content": f"{recommendation}\n\nSummary:\n{summary.strip()}",
+                },
+            ],
+            user_id=self.context.user_id,
+            metadata=metadata,
+        )
 
 
 class OrchestratorFactory:
