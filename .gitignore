@@ -1,0 +1,5 @@
+.env
+.cursor
+__pycache__
+.venv
+8_fold_assistant.egg-info
