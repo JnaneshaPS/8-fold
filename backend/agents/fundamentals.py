@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from agents import function_tool
 
 from backend.external.perplexity import ask_structured_perplexity
+from backend.observability import render_prompt
 
 
 class CompanyProfile(BaseModel):
@@ -103,19 +104,10 @@ async def fetch_company_fundamentals(
 
     ctx = "\n".join(query_ctx_parts)
 
-    prompt = f"""
-You are a B2B account research assistant generating clean JSON for an account plan.
-
-Given the following company context:
-
-{ctx}
-
-1. Identify the canonical company (avoid mixing multiple companies with similar names).
-2. Use only reliable, web-verified information.
-3. If you are uncertain about a numeric field, leave it null instead of guessing.
-
-Return ONLY a JSON object that matches the provided schema. Do not add commentary.
-"""
+    prompt = render_prompt(
+        "fundamentals_agent_prompt",
+        variables={"company_context": ctx}
+    )
 
     return await ask_structured_perplexity(prompt, CompanyFundamentals)
 

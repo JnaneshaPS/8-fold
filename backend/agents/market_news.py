@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from agents import function_tool
 
 from backend.external.perplexity import ask_structured_perplexity
+from backend.observability import render_prompt
 
 
 class NewsItem(BaseModel):
@@ -57,21 +58,13 @@ async def fetch_market_news(
     if website:
         ctx += f"\nWebsite: {website}"
 
-    prompt = f"""
-You are generating a 'Latest news' section for an account plan.
-
-Given:
-
-{ctx}
-
-1. Look at the most relevant, recent news items (last 6–12 months if possible).
-2. Prefer news that matters to a sales / partnerships / security conversation:
-   product launches, funding, big customers, security incidents, layoffs, pivots, etc.
-3. Avoid trivial news or SEO spam.
-
-Return ONLY a JSON object conforming to the MarketNewsSummary schema.
-Make sure you include at most {max_items} high-signal items.
-"""
+    prompt = render_prompt(
+        "market_news_agent_prompt",
+        variables={
+            "company_context": ctx,
+            "max_items": str(max_items),
+        }
+    )
 
     summary = await ask_structured_perplexity(prompt, MarketNewsSummary)
 

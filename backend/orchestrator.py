@@ -48,6 +48,7 @@ from backend.memory.mem0_client import (
     MEM0_ENABLED,
 )
 from backend.mcp.exa_client import create_exa_web_search_tool
+from backend.observability import render_prompt, observe_span
 
 
 @dataclass
@@ -204,13 +205,9 @@ class ResearchOrchestrator:
         self.agent = self._build_research_agent()
 
     def _build_research_agent(self) -> Agent[SessionContext]:
-        instructions = """
-You orchestrate research for B2B personas.
-
-Workflow:
-1. Optionally call exa_web_search (MCP) to gather recent web snippets about the target company when the request lacks detail or you need confirmation.
-2. Call run_research_pipeline exactly once with the original user request (or cleaned company name). This returns the structured FullResearchReport JSON. Do not alter the JSON.
-3. Return the JSON output as-is (no commentary)."""
+        instructions = render_prompt(
+            "research_orchestrator_prompt"
+        )
 
         tools: List[Any] = [run_research_pipeline_tool]
         exa_tool = self._get_exa_tool()
@@ -226,6 +223,7 @@ Workflow:
             tools=tools,
         )
 
+    @observe_span(name="research_mode")
     async def run_full_research(
         self,
         request: str,
@@ -317,11 +315,11 @@ class ChatOrchestrator:
         def dynamic_instructions(ctx, agent):
             persona_info = ""
             if ctx.context.persona:
-                persona_info = f"""
-Current Persona: {ctx.context.persona.name}
-Role: {ctx.context.persona.role}
-Company: {ctx.context.persona.company}
-"""
+                persona_info = (
+                    f"Current Persona: {ctx.context.persona.name}\n"
+                    f"Role: {ctx.context.persona.role}\n"
+                    f"Company: {ctx.context.persona.company}"
+                )
 
             memory_context = ""
             if MEM0_ENABLED:
@@ -335,27 +333,25 @@ Company: {ctx.context.persona.company}
                         memories = recent_memories["results"]
                         if memories:
                             memory_context = "\n".join(
-                                [f"- {m.get('memory', '')}" for m in memories[:3]]
+                                [
+                                    f"- {m.get('memory', '').strip()}"
+                                    for m in memories[:3]
+                                    if m.get("memory")
+                                ]
                             )
                 except Exception:
                     pass
 
-            return f"""
-You are a helpful B2B research assistant in Chat Mode.
-
-{persona_info}
-
-Recent context:
-{memory_context}
-
-You can:
-- Answer questions about companies, industries, and market trends
-- Always please response with a clear and concise manner, do not be verbose. 100% Humanied.
-{"- Call the memory_lookup tool whenever you need details from past research, comparisons, or previous conversations for this persona." if MEM0_ENABLED else ""}
-
-Be conversational, helpful, and concise. If the user asks for deep research on a company,
-suggest they use Research Mode for it.
-"""
+            return render_prompt(
+                "chat_assistant_prompt",
+                variables={
+                    "persona_info": persona_info or "No persona metadata on file.",
+                    "memory_context": memory_context or "No stored memory yet.",
+                    "memory_tool_instruction": ""
+                    if not MEM0_ENABLED
+                    else "Call the memory_lookup tool whenever you need details from past research, comparisons, or previous conversations for this persona.",
+                }
+            )
 
         tools = [memory_lookup_tool] if MEM0_ENABLED else []
 
@@ -366,6 +362,7 @@ suggest they use Research Mode for it.
             tools=tools,
         )
 
+    @observe_span(name="chat_mode")
     async def chat(self, message: str) -> str:
         self.conversation_history.append({"role": "user", "content": message})
         
@@ -414,6 +411,7 @@ class CompareOrchestrator:
     def __init__(self, context: SessionContext):
         self.context = context
 
+    @observe_span(name="compare_mode")
     async def compare_companies(
         self,
         company_a: str,

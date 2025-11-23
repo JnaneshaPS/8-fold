@@ -11,6 +11,7 @@ from backend.external.perplexity import ask_structured_perplexity
 from backend.agents.fundamentals import CompanyFundamentals
 from backend.agents.market_news import MarketNewsSummary
 from backend.agents.tech_services import TechServicesSummary
+from backend.observability import render_prompt
 
 
 class PersonaContext(BaseModel):
@@ -123,30 +124,10 @@ async def build_persona_strategy(
         indent=2,
     )
 
-    prompt = f"""
-You are an expert B2B account strategist.
-
-You will be given a JSON blob containing:
-- persona: who the user is and what they care about
-- fundamentals: company profile + numbers
-- news: latest news summary
-- tech_services: products and tech stack
-
-JSON INPUT:
-{context_blob}
-
-Your job is to reason carefully and then output a single JSON object that:
-
-1. Explains WHY THIS ACCOUNT MATTERS for this specific persona (why_it_matters).
-2. Lists specific, concrete OPPORTUNITIES FOR ME (opportunities_for_me).
-3. Lists KEY UNKNOWNS / OPEN QUESTIONS (key_unknowns).
-4. Lists major RISKS / BLOCKERS (risks_blockers).
-5. Proposes practical NEXT STEPS (next_steps).
-6. Suggests follow-up QUESTIONS the user can click in the UI (suggested_followups).
-
-Be realistic and honest. If something is speculative, say so in the description.
-Return ONLY JSON matching the PersonaStrategyOutput schema. No extra commentary.
-"""
+    prompt = render_prompt(
+        "persona_strategy_agent_prompt",
+        variables={"context_blob": context_blob}
+    )
 
     return await ask_structured_perplexity(prompt, PersonaStrategyOutput)
 

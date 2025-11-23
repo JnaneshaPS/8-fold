@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from agents import function_tool
 
 from backend.external.perplexity import ask_structured_perplexity
+from backend.observability import render_prompt
 
 
 class ProductOrService(BaseModel):
@@ -66,21 +67,10 @@ async def fetch_tech_and_services(
     if website:
         ctx += f"\nWebsite: {website}"
 
-    prompt = f"""
-You are preparing the 'Services / products' and 'Tech stack' sections
-for a B2B account plan.
-
-Given:
-
-{ctx}
-
-1. Identify the main products/services that are most relevant to a B2B conversation.
-2. Identify the visible tech stack only from reliable public signals:
-   docs, careers pages, engineering blogs, case studies, etc.
-3. Do NOT guess deep internal architecture. Keep it high-level and honest.
-
-Return ONLY a JSON object that matches the TechServicesSummary schema.
-"""
+    prompt = render_prompt(
+        "tech_services_agent_prompt",
+        variables={"company_context": ctx}
+    )
 
     return await ask_structured_perplexity(prompt, TechServicesSummary)
 

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from agents import function_tool
 
 from backend.external.perplexity import ask_structured_perplexity
+from backend.observability import render_prompt
 
 
 class Leader(BaseModel):
@@ -54,20 +55,10 @@ async def fetch_leadership(
     if website:
         ctx += f"\nWebsite: {website}"
 
-    prompt = f"""
-You are identifying key people for an account plan.
-
-Given:
-
-{ctx}
-
-1. Focus on executive and senior leaders relevant to sales / partnerships /
-   security / IT decisions (e.g. CEO, CTO, CISO, VP Engineering, VP Security).
-2. Whenever possible, include their LinkedIn profile URL.
-3. Do NOT fabricate people. If uncertain, leave them out instead of guessing.
-
-Return ONLY a JSON object matching the LeadershipSummary schema. No extra text.
-"""
+    prompt = render_prompt(
+        "leadership_agent_prompt",
+        variables={"company_context": ctx}
+    )
 
     return await ask_structured_perplexity(prompt, LeadershipSummary)
 
