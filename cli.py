@@ -91,7 +91,8 @@ async def main():
             print(f"\n[RESEARCH MODE: {company}]")
             try:
                 orch = OrchestratorFactory.create_research_orchestrator("cli_user", persona_id)
-                report = await orch.run_full_research(company, save_to_db=True)
+                prompt = f"Research {company}"
+                report = await orch.run_full_research(prompt, save_to_db=True)
                 
                 print(f"\n✓ {report.fundamentals.profile.company_name}")
                 print(f"  HQ: {report.fundamentals.profile.headquarters}")

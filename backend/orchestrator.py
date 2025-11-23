@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
+import asyncio
 from typing import Any, Dict, List, Optional
 
-from agents import Agent, Runner, function_tool, ModelSettings, RunContextWrapper
+from agents import Agent, Runner, function_tool, RunContextWrapper
 from pydantic import BaseModel, Field
 
 from backend.agents.fundamentals import (
@@ -46,7 +47,11 @@ from backend.db.cruds import (
     get_persona,
 )
 from backend.db.models import PersonaRead, ReportCreate
-from backend.memory.mem0_client import add_memory, search_memory
+from backend.memory.mem0_client import (
+    add_memory,
+    search_memory,
+    MEM0_ENABLED,
+)
 
 
 @dataclass
@@ -71,6 +76,9 @@ def memory_lookup_tool(
         limit: Maximum number of results to return.
         persona_only: Restrict results to the active persona when available.
     """
+
+    if not MEM0_ENABLED:
+        return "Memory is disabled."
 
     user_id = ctx.context.user_id
     persona_id = (
@@ -145,7 +153,7 @@ Return all results in the FullResearchReport format with all required fields pop
         return Agent(
             name="Research Orchestrator",
             instructions=instructions,
-            model="gpt-5.1",
+            model="gpt-5-mini",
             output_type=FullResearchReport,
             tools=[
                 fundamentals_tool,
@@ -159,19 +167,15 @@ Return all results in the FullResearchReport format with all required fields pop
 
     async def run_full_research(
         self,
-        company_name: str,
-        website: Optional[str] = None,
-        region_hint: Optional[str] = None,
+        request: str,
         save_to_db: bool = True,
     ) -> FullResearchReport:
         if not self.context.persona:
             raise ValueError("Persona must be set in context before running research")
 
-        query = f"Research {company_name}"
-        if website:
-            query += f" (website: {website})"
-        if region_hint:
-            query += f" in {region_hint}"
+        query = request.strip()
+        if not query:
+            raise ValueError("Research request cannot be empty")
 
         result = await Runner.run(self.agent, query, context=self.context)
         report = result.final_output_as(FullResearchReport)
@@ -179,7 +183,10 @@ Return all results in the FullResearchReport format with all required fields pop
         if save_to_db:
             await self._save_report_to_db(report)
 
-        await self._save_to_memory(company_name, report)
+        await self._save_to_memory(
+            report.fundamentals.profile.company_name,
+            report,
+        )
 
         return report
 
@@ -236,20 +243,21 @@ Company: {ctx.context.persona.company}
 """
 
             memory_context = ""
-            try:
-                recent_memories = search_memory(
-                    query="recent conversations and research",
-                    user_id=ctx.context.user_id,
-                    limit=5,
-                )
-                if recent_memories and "results" in recent_memories:
-                    memories = recent_memories["results"]
-                    if memories:
-                        memory_context = "\n".join(
-                            [f"- {m.get('memory', '')}" for m in memories[:3]]
-                        )
-            except Exception:
-                pass
+            if MEM0_ENABLED:
+                try:
+                    recent_memories = search_memory(
+                        query="recent conversations and research",
+                        user_id=ctx.context.user_id,
+                        limit=5,
+                    )
+                    if recent_memories and "results" in recent_memories:
+                        memories = recent_memories["results"]
+                        if memories:
+                            memory_context = "\n".join(
+                                [f"- {m.get('memory', '')}" for m in memories[:3]]
+                            )
+                except Exception:
+                    pass
 
             return f"""
 You are a helpful B2B research assistant in Chat Mode.
@@ -264,18 +272,19 @@ You can:
 - Provide quick summaries and insights
 - Help users understand their research targets
 - Suggest when to run a full Research Mode report
-- Call the memory_lookup tool whenever you need details from past research,
-  comparisons, or previous conversations for this persona.
+{"- Call the memory_lookup tool whenever you need details from past research, comparisons, or previous conversations for this persona." if MEM0_ENABLED else ""}
 
 Be conversational, helpful, and concise. If the user asks for deep research on a company,
 suggest they use Research Mode for a complete structured report.
 """
 
+        tools = [memory_lookup_tool] if MEM0_ENABLED else []
+
         return Agent(
             name="Chat Assistant",
             instructions=dynamic_instructions,
-            model="gpt-5.1",
-            tools=[memory_lookup_tool],
+            model="gpt-5-mini",
+            tools=tools,
         )
 
     async def chat(self, message: str) -> str:
@@ -335,8 +344,10 @@ class CompareOrchestrator:
         if not self.context.persona:
             raise ValueError("Persona must be set in context before comparison")
 
-        report_a = await self._get_or_create_report(company_a, use_cached)
-        report_b = await self._get_or_create_report(company_b, use_cached)
+        report_a, report_b = await asyncio.gather(
+            self._get_or_create_report(company_a, use_cached),
+            self._get_or_create_report(company_b, use_cached),
+        )
 
         comparison_summary = self._build_comparison_summary(
             report_a, report_b, company_a, company_b
@@ -406,7 +417,7 @@ class CompareOrchestrator:
 
         orchestrator = ResearchOrchestrator(self.context)
         return await orchestrator.run_full_research(
-            company_name=company_name,
+            request=f"Research {company_name}",
             save_to_db=True,
         )
 

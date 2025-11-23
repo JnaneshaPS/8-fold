@@ -13,7 +13,7 @@ from backend.db.cruds import (
     list_reports_for_persona,
 )
 from backend.db.models import PersonaCreate, PersonaRead, ReportRead
-from ui import ChatPage, ResearchPage, ComparePage
+from ui import ChatPage
 
 
 class AssistantApp:
@@ -21,8 +21,6 @@ class AssistantApp:
         init_db()
         self.user_id = self._ensure_user_id()
         self.chat_page = ChatPage(self.user_id)
-        self.research_page = ResearchPage(self.user_id)
-        self.compare_page = ComparePage(self.user_id)
 
     def run(self) -> None:
         st.set_page_config(page_title="8-Fold Assistant", layout="wide")
@@ -30,18 +28,7 @@ class AssistantApp:
         persona_id, persona = self._render_sidebar(personas)
         self._render_header(persona)
 
-        mode = st.sidebar.radio(
-            "Mode",
-            options=["Chat", "Research", "Compare"],
-            key="ui_mode",
-        )
-
-        if mode == "Chat":
-            self.chat_page.render(persona_id)
-        elif mode == "Research":
-            self.research_page.render(persona_id)
-        else:
-            self.compare_page.render(persona_id)
+        self.chat_page.render(persona_id)
 
     def _ensure_user_id(self) -> str:
         if "ui_user_id" not in st.session_state:
@@ -86,7 +73,10 @@ class AssistantApp:
                 if reports:
                     for report in reports:
                         created = report.created_at.strftime("%Y-%m-%d")
-                        st.write(f"{report.company_name} • {created}")
+                        label = report.company_name
+                        if report.report_json.get("comparison_pair"):
+                            label += " (comparison)"
+                        st.write(f"{label} • {created}")
                 else:
                     st.write("No research yet.")
 
@@ -101,10 +91,7 @@ class AssistantApp:
                 region = st.text_input("Region")
                 goal = st.text_input("Goal")
                 notes = st.text_area("Notes")
-                submitted = st.form_submit_button(
-                    "Save persona",
-                    disabled=not name.strip(),
-                )
+                submitted = st.form_submit_button("Save persona")
             if submitted and name.strip():
                 data = PersonaCreate(
                     name=name.strip(),
@@ -118,6 +105,8 @@ class AssistantApp:
                     create_persona(db, data)
                 st.success("Persona saved.")
                 st.rerun()
+            elif submitted:
+                st.warning("Name is required to create a persona.")
 
     def _load_reports(self, persona_id: uuid.UUID) -> List[ReportRead]:
         with get_session() as db:

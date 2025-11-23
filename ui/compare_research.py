@@ -6,6 +6,8 @@ from typing import Optional
 
 import streamlit as st
 
+import re
+
 from backend.orchestrator import OrchestratorFactory, CompareResult
 
 
@@ -19,26 +21,52 @@ class ComparePage:
             return
 
         state_key = f"compare_result_{persona_id}"
+        pending_key = f"compare_pending_{persona_id}"
 
-        with st.form("compare_form", clear_on_submit=False):
-            company_a = st.text_input("Company A")
-            company_b = st.text_input("Company B")
-            use_cached = st.checkbox("Reuse cached research when possible", value=True)
-            submitted = st.form_submit_button(
-                "Compare",
-                disabled=not company_a.strip() or not company_b.strip(),
-            )
+        request = st.text_input(
+            "What comparison do you need?",
+            placeholder="Example: Compare Stripe vs Razorpay for enterprise security.",
+        )
+        use_cached = st.checkbox("Reuse cached research when possible", value=True)
+        if st.button("Run comparison", disabled=not request.strip()):
+            request_text = request.strip()
+            companies = self._extract_companies(request_text)
+            pending = st.session_state.get(pending_key)
 
-        if submitted and company_a.strip() and company_b.strip():
-            with st.spinner("Comparing accounts"):
-                result = self._run_compare(
+            if len(companies) >= 2:
+                company_a, company_b = companies[0], companies[1]
+                result = self._execute_compare(
                     persona_id=persona_id,
-                    company_a=company_a.strip(),
-                    company_b=company_b.strip(),
+                    company_a=company_a,
+                    company_b=company_b,
                     use_cached=use_cached,
                 )
-            st.session_state[state_key] = result.model_dump(mode="json")
-            st.success(f"Completed comparison: {company_a.strip()} vs {company_b.strip()}")
+                st.session_state[state_key] = result.model_dump(mode="json")
+                st.session_state.pop(pending_key, None)
+                st.success(f"Completed comparison: {company_a} vs {company_b}")
+            elif len(companies) == 1:
+                if pending:
+                    company_a = pending
+                    company_b = companies[0]
+                    result = self._execute_compare(
+                        persona_id=persona_id,
+                        company_a=company_a,
+                        company_b=company_b,
+                        use_cached=use_cached,
+                    )
+                    st.session_state[state_key] = result.model_dump(mode="json")
+                    st.session_state.pop(pending_key, None)
+                    st.success(f"Completed comparison: {company_a} vs {company_b}")
+                else:
+                    st.session_state[pending_key] = companies[0]
+                    st.info(
+                        f"Noted {companies[0]}. Please provide another company to compare.",
+                    )
+            else:
+                st.warning(
+                    "Couldn't identify any company names. "
+                    "Try phrasing it like 'Compare CompanyA vs CompanyB'.",
+                )
 
         stored = st.session_state.get(state_key)
         if not stored:
@@ -48,7 +76,7 @@ class ComparePage:
         result = CompareResult.model_validate(stored)
         self._render_result(result)
 
-    def _run_compare(
+    def _execute_compare(
         self,
         *,
         persona_id: uuid.UUID,
@@ -123,5 +151,20 @@ class ComparePage:
             column.markdown("**Risks**")
             for risk in data["risks"]:
                 column.write(f"- {risk}")
+
+    def _extract_companies(self, request: str) -> list[str]:
+        text = request.strip()
+        if not text:
+            return []
+
+        parts = re.split(r"\s+vs\.?\s+|\s+versus\s+", text, flags=re.IGNORECASE)
+        if len(parts) >= 2:
+            return [parts[0].strip(" ,.;") or "", parts[1].strip(" ,.;") or ""]
+
+        if "," in text:
+            chunks = [chunk.strip(" ,.;") for chunk in text.split(",") if chunk.strip()]
+            return chunks[:2]
+
+        return [text]
 
 

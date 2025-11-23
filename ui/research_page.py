@@ -21,22 +21,18 @@ class ResearchPage:
 
         state_key = f"research_report_{persona_id}"
 
-        with st.form("research_form", clear_on_submit=False):
-            company = st.text_input("Company name")
-            website = st.text_input("Website", placeholder="example.com")
-            region = st.text_input("Region hint", placeholder="US, EMEA, APAC")
-            submitted = st.form_submit_button("Run research", disabled=not company.strip())
-
-        if submitted and company.strip():
+        request = st.text_area(
+            "What do you want me to research?",
+            placeholder="Example: Deep dive on Salesforce's product strategy and security needs.",
+        )
+        if st.button("Run research", disabled=not request.strip()):
             with st.spinner("Running research"):
                 report = self._run_research(
                     persona_id=persona_id,
-                    company=company.strip(),
-                    website=website.strip() or None,
-                    region=region.strip() or None,
+                    request=request.strip(),
                 )
             st.session_state[state_key] = report.model_dump(mode="json")
-            st.success(f"Completed research for {company.strip()}")
+            st.success("Research complete")
 
         stored = st.session_state.get(state_key)
         if not stored:
@@ -50,9 +46,7 @@ class ResearchPage:
         self,
         *,
         persona_id: uuid.UUID,
-        company: str,
-        website: Optional[str],
-        region: Optional[str],
+        request: str,
     ) -> FullResearchReport:
         orchestrator = OrchestratorFactory.create_research_orchestrator(
             self.user_id,
@@ -60,12 +54,11 @@ class ResearchPage:
         )
         return asyncio.run(
             orchestrator.run_full_research(
-                company_name=company,
-                website=website,
-                region_hint=region,
+                request=request,
                 save_to_db=True,
             )
         )
+
 
     def _render_report(self, report: FullResearchReport) -> None:
         self._render_profile(report)
