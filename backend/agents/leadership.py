@@ -57,7 +57,7 @@ async def fetch_leadership(
 
     prompt = render_prompt(
         "leadership_agent_prompt",
-        variables={"company_context": ctx}
+        variables={"company_context": ctx},
     )
 
     return await ask_structured_perplexity(prompt, LeadershipSummary)

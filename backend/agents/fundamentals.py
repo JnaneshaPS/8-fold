@@ -106,7 +106,7 @@ async def fetch_company_fundamentals(
 
     prompt = render_prompt(
         "fundamentals_agent_prompt",
-        variables={"company_context": ctx}
+        variables={"company_context": ctx},
     )
 
     return await ask_structured_perplexity(prompt, CompanyFundamentals)

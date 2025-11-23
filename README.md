@@ -1,152 +1,118 @@
 # 8-Fold Assistant
 
-AI-powered Account Research & Planning Assistant for B2B personas.
+AI-powered Company Research Assistant (Account Plan Generator) for B2B personas.
+
+## Feature Checklist
+
+| Requirement | Coverage |
+|-------------|----------|
+| Gather information from multiple sources and synthesize findings | Research mode orchestrates Fundamentals, Leadership, Tech, News, Strategy, and Visualization agents powered by Perplexity, Exa MCP, and finance APIs. |
+| Provide updates during research | Chat mode (text) and Realtime mode (voice) sit on top of the same persona + Mem0 memory. Users can ask the assistant mid-run (“Should we dig deeper on X?”) and it will summarize current findings or trigger another research pass. |
+| Allow users to update sections of the generated account plan | Reports are persisted in NeonDB plus Mem0. Users can re-run Research or use Chat to overwrite/augment sections (e.g., “Update opportunities to highlight fraud surface on BNPL”). |
+| Interaction Mode: Chat or voice | Streamlit sidebar lets users pick **Assistant** (Chat/Research/Compare) or **Realtime Voice** (WebRTC voice session with OpenAI Realtime API). |
 
 ## Architecture
 
-The application is built using:
-- **Frontend**: Streamlit
+- **Frontend**: Streamlit (text assistant + realtime voice page)
 - **Backend**: Python with OpenAI Agents SDK
-- **Database**: NeonDB (PostgreSQL)
+- **DB**: Neon/PostgreSQL
 - **Memory**: Mem0
-- **APIs**: Perplexity, Exa (via MCP), Finance APIs
+- **External sources**: Perplexity Sonar-Pro, Exa MCP (web search), Alpha Vantage/finance API, OpenAI Realtime
 
-## Core Components
+## User Experience
 
-### Orchestrators
+1. **Personas**: Create/select a persona (role, company, goal). Persona context drives every agent.
+2. **Assistant Experience**  
+   - *Chat*: Conversational Q&A; can summarize, gather updates, or ask clarifying questions mid research.  
+   - *Research*: Launches the full orchestrator to gather data, synthesizes a detailed plan, saves it to Neon + Mem0.  
+   - *Compare*: Compares two companies by reusing cached reports or running lightweight research.  
+3. **Realtime Voice**: WebRTC mic capture + OpenAI Realtime session using persona context. No tokens persist beyond the session; Connect/Stop buttons control media.
 
-The system has three main orchestrators:
+## Running the App
 
-1. **ResearchOrchestrator**: Conducts deep company research
-2. **ChatOrchestrator**: Handles conversational interactions
-3. **CompareOrchestrator**: Compares two companies
+```bash
+uv sync
+python -c "from backend.db.cruds import init_db; init_db()"
+streamlit run app.py
+```
 
-### Agents
+Environment variables:
+```
+OPENAI_API_KEY=...
+PERPLEXITY_API_KEY=...
+MEM0_API_KEY=...
+NEON_DATABASE_URL=...
+EXA_API_KEY=...
+OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview (optional)
+OPENAI_REALTIME_VOICE=alloy (optional)
+```
 
-Specialized agents handle different research aspects:
-- **Fundamentals Agent**: Company profile, key numbers, business model
-- **Leadership Agent**: Key decision makers with LinkedIn profiles
-- **Market News Agent**: Recent news and sentiment
-- **Tech Services Agent**: Products, services, and tech stack
-- **Persona Strategy Agent**: Persona-specific insights and opportunities
-- **Visualization Agent**: Stock price charts for public companies
+## Key Modules
 
-## Usage
+```
+backend/
+├── orchestrator.py          # Chat/Research/Compare orchestrators
+├── agents/                  # Fundamentals, Leadership, Market News, Tech/Services, Persona Strategy, Visualization
+├── realtime/session.py      # Persona-aware realtime session builder
+├── memory/mem0_client.py    # Mem0 add/search helpers
+└── db/                      # Personas, reports, compare sessions
 
-### Research Mode
+ui/
+├── chat_page.py             # Chat + Research + Compare UI
+├── realtime_page.py         # Realtime WebRTC widget
+└── __init__.py
+```
 
+## Programmatic Examples
+
+### Running Research
 ```python
 from backend.orchestrator import OrchestratorFactory
 import asyncio
 
-async def run_research():
-    orchestrator = OrchestratorFactory.create_research_orchestrator(
-        user_id="user123",
-        persona_id="uuid-of-persona"
+async def main():
+    orch = OrchestratorFactory.create_research_orchestrator(
+        user_id="demo",
+        persona_id="uuid-persona"
     )
-    
-    report = await orchestrator.run_full_research(
-        company_name="Stripe",
-        website="https://stripe.com",
-        save_to_db=True
-    )
-    
-    print(f"Research complete for {report.fundamentals.profile.company_name}")
-    print(f"Opportunities: {len(report.strategy.opportunities_for_me)}")
+    report = await orch.run_full_research(request="Research Stripe", save_to_db=True)
+    print(report.strategy.why_it_matters)
 
-asyncio.run(run_research())
+asyncio.run(main())
 ```
 
-### Chat Mode
-
+### Chatting
 ```python
-async def chat_example():
-    orchestrator = OrchestratorFactory.create_chat_orchestrator(
-        user_id="user123",
-        persona_id="uuid-of-persona"
+async def chat():
+    chat_orch = OrchestratorFactory.create_chat_orchestrator(
+        user_id="demo",
+        persona_id="uuid-persona"
     )
-    
-    response = await orchestrator.chat("Tell me about payment processing companies in India")
-    print(response)
+    print(await chat_orch.chat("Give me a quick update on Stripe vs Razorpay."))
 
-asyncio.run(chat_example())
+asyncio.run(chat())
 ```
 
-### Compare Mode
-
+### Comparing Companies
 ```python
-async def compare_example():
-    orchestrator = OrchestratorFactory.create_compare_orchestrator(
-        user_id="user123",
-        persona_id="uuid-of-persona"
+async def compare():
+    compare_orch = OrchestratorFactory.create_compare_orchestrator(
+        user_id="demo",
+        persona_id="uuid-persona"
     )
-    
-    result = await orchestrator.compare_companies(
-        company_a="Stripe",
-        company_b="Razorpay",
-        use_cached=True
-    )
-    
+    result = await compare_orch.compare_companies("Stripe", "Razorpay")
     print(result.recommendation)
-    print(result.comparison_summary)
 
-asyncio.run(compare_example())
+asyncio.run(compare())
 ```
 
-## Database Models
+## How “updates” work
 
-### Persona
-Represents a user's selling persona with role, company, region, and goals.
+- Reports are persisted; rerunning Research overwrites/extends the JSON per persona/company.
+- Chat or Realtime can summarize current sections (“Show me the latest opportunities”) or rewrite them (“Replace risks with X/Y”). Those instructions flow through the Persona Strategy agent and Mem0 so future runs keep the adjustments.
 
-### Report
-Stores full research reports with all sections as JSON.
+## Realtime Voice Quickstart
 
-### CompareSession
-Records company comparison results.
-
-## Environment Variables
-
-Required environment variables:
-```
-OPENAI_API_KEY=sk-...
-PERPLEXITY_API_KEY=...
-MEM0_API_KEY=...
-NEON_DATABASE_URL=postgresql://...
-EXA_API_KEY=...
-```
-
-## Project Structure
-
-```
-backend/
-├── agents/           # Specialized research agents
-├── db/              # Database models and CRUD operations
-├── external/        # External API clients
-├── mcp/             # MCP client integrations
-├── memory/          # Mem0 memory management
-├── utils/           # Utilities (PDF export, scraping)
-└── orchestrator.py  # Main orchestration logic
-
-ui/
-├── chat_page.py
-├── research_page.py
-└── compare_research.py
-```
-
-## Development
-
-Install dependencies:
-```bash
-uv sync
-```
-
-Initialize database:
-```bash
-python -c "from backend.db.cruds import init_db; init_db()"
-```
-
-Run Streamlit app:
-```bash
-streamlit run app.py
-```
-
+1. Run `streamlit run app.py`.
+2. Select a persona → choose **Realtime Voice** in the sidebar.
+3. Click **Refresh token** if needed, then **Connect** (allow microphone). Speak naturally; the assistant replies via audio and logs transcripts.

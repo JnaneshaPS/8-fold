@@ -127,6 +127,7 @@ class FullResearchReport(BaseModel):
     tech_services: TechServicesSummary
     strategy: PersonaStrategyOutput
     stock: Optional[StockSeries] = None
+    stock_error: Optional[str] = None
 
 
 def _strip_request(request: str) -> str:
@@ -172,15 +173,21 @@ async def run_research_pipeline_tool(
     )
 
     stock = None
+    stock_error = None
     ticker = fundamentals.profile.stock_ticker
+    
+    if ticker and ":" in ticker:
+        ticker = ticker.split(":")[-1]
+
     if ticker and fundamentals.profile.public_status == "public":
         try:
             stock = await get_stock_series(
                 symbol=ticker,
                 company_name=fundamentals.profile.company_name,
             )
-        except Exception:
+        except Exception as exc:
             stock = None
+            stock_error = str(exc)
 
     report = FullResearchReport(
         fundamentals=fundamentals,
@@ -189,6 +196,7 @@ async def run_research_pipeline_tool(
         tech_services=tech,
         strategy=strategy,
         stock=stock,
+        stock_error=stock_error,
     )
 
     return report.model_dump_json()

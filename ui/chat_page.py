@@ -35,7 +35,8 @@ class ChatPage:
 
         for entry in st.session_state[history_key]:
             if isinstance(entry, dict):
-                st.chat_message(entry["role"]).write(entry["content"])
+                role = entry["role"]
+                content = entry["content"]
             else:
                 role, content = entry
             st.chat_message(role).write(content)
@@ -185,11 +186,6 @@ class ChatPage:
                     line += f" [{step.timeframe}]"
                 lines.append(line)
 
-        if report.strategy.suggested_followups:
-            lines.append("\n### Suggested follow-ups")
-            for suggestion in report.strategy.suggested_followups[:6]:
-                lines.append(f"- {suggestion}")
-
         if report.news.items:
             lines.append("\n### Latest news")
             for item in report.news.items[:5]:
@@ -212,6 +208,11 @@ class ChatPage:
             for component in report.tech_services.tech_stack[:6]:
                 techs = ", ".join(component.technologies[:6]) or "Unknown"
                 lines.append(f"- **{component.area}**: {techs}")
+
+        if report.strategy.suggested_followups:
+            lines.append("\n### Suggested follow-ups")
+            for suggestion in report.strategy.suggested_followups[:6]:
+                lines.append(f"- {suggestion}")
 
         return "\n".join(lines)
 

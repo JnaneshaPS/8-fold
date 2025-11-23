@@ -71,6 +71,7 @@ class ResearchPage:
         self._render_products(report)
         self._render_tech(report)
         self._render_strategy(report)
+        self._render_followups(report.strategy.suggested_followups)
 
     def _render_profile(self, report: FullResearchReport) -> None:
         profile = report.fundamentals.profile
@@ -94,7 +95,22 @@ class ResearchPage:
         stock = report.stock
         st.subheader("Market data")
         if not stock or not stock.points:
-            st.write("No public market data available.")
+            if report.stock_error:
+                st.warning(
+                    "Unable to fetch stock data. "
+                    f"{report.stock_error}"
+                )
+            else:
+                profile = report.fundamentals.profile
+                if profile.public_status == "public":
+                    ticker = profile.stock_ticker or "N/A"
+                    st.info(
+                        f"No market data returned. "
+                        "Ensure the ticker is correct "
+                        f"(current: {ticker}) and ALPHAVANTAGE_API_KEY is set."
+                    )
+                else:
+                    st.write("No public market data available.")
             return
         data = pd.DataFrame(
             [
@@ -216,9 +232,10 @@ class ResearchPage:
                 st.write(line)
         else:
             st.write("No next steps captured.")
+    def _render_followups(self, followups):
         st.subheader("Suggested follow-ups")
-        if strategy.suggested_followups:
-            for suggestion in strategy.suggested_followups:
+        if followups:
+            for suggestion in followups:
                 st.write(f"- {suggestion}")
         else:
             st.write("No follow-up prompts available.")
