@@ -38,7 +38,7 @@ class ChatPage:
                 st.chat_message(entry["role"]).write(entry["content"])
             else:
                 role, content = entry
-                st.chat_message(role).write(content)
+            st.chat_message(role).write(content)
 
         prompt = st.chat_input("Type your message")
         if not prompt:
@@ -220,7 +220,7 @@ class ChatPage:
             f"## Recommendation\n{result.recommendation}",
             "\n## Summary",
             result.comparison_summary.strip(),
-        ]
+                ]
 
         lines.append("\n## Company snapshots")
         lines.append(self._format_company_block(result.company_a))

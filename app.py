@@ -13,7 +13,7 @@ from backend.db.cruds import (
     list_reports_for_persona,
 )
 from backend.db.models import PersonaCreate, PersonaRead, ReportRead
-from ui import ChatPage
+from ui import ChatPage, RealtimePage
 
 
 class AssistantApp:
@@ -21,6 +21,7 @@ class AssistantApp:
         init_db()
         self.user_id = self._ensure_user_id()
         self.chat_page = ChatPage(self.user_id)
+        self.realtime_page = RealtimePage(self.user_id)
 
     def run(self) -> None:
         st.set_page_config(page_title="8-Fold Assistant", layout="wide")
@@ -28,7 +29,17 @@ class AssistantApp:
         persona_id, persona = self._render_sidebar(personas)
         self._render_header(persona)
 
-        self.chat_page.render(persona_id)
+        experience = st.sidebar.radio(
+            "Experience",
+            options=["Assistant", "Realtime Voice"],
+            index=0,
+            key="assistant_experience",
+        )
+
+        if experience == "Realtime Voice":
+            self.realtime_page.render(persona)
+        else:
+            self.chat_page.render(persona_id)
 
     def _ensure_user_id(self) -> str:
         if "ui_user_id" not in st.session_state:
