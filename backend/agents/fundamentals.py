@@ -90,15 +90,11 @@ class CompanyFundamentals(BaseModel):
     )
 
 
-def fetch_company_fundamentals(
+async def fetch_company_fundamentals(
     company_name: str,
     website: Optional[str] = None,
     region_hint: Optional[str] = None,
 ) -> CompanyFundamentals:
-    """
-    Call Perplexity with structured outputs to get company fundamentals.
-    """
-
     query_ctx_parts = [f"Company name: {company_name}"]
     if website:
         query_ctx_parts.append(f"Website: {website}")
@@ -121,27 +117,16 @@ Given the following company context:
 Return ONLY a JSON object that matches the provided schema. Do not add commentary.
 """
 
-    return ask_structured_perplexity(prompt, CompanyFundamentals)
+    return await ask_structured_perplexity(prompt, CompanyFundamentals)
 
 
 @function_tool
-def fundamentals_tool(
+async def fundamentals_tool(
     company_name: str,
     website: Optional[str] = None,
     region_hint: Optional[str] = None,
 ) -> str:
-    """
-    Fetch structured company fundamentals (profile + key numbers).
-
-    Args:
-        company_name: The name of the company to research.
-        website: Optional official website URL if known.
-        region_hint: Optional region/country hint to disambiguate the company.
-
-    Returns:
-        A JSON string matching the CompanyFundamentals schema.
-    """
-    result = fetch_company_fundamentals(
+    result = await fetch_company_fundamentals(
         company_name=company_name,
         website=website,
         region_hint=region_hint,

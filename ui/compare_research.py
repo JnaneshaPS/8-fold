@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import uuid
 from typing import Optional
 
@@ -8,12 +7,16 @@ import streamlit as st
 
 import re
 
+import asyncio
+import threading
+
 from backend.orchestrator import OrchestratorFactory, CompareResult
 
 
 class ComparePage:
     def __init__(self, user_id: str):
         self.user_id = user_id
+        self._loop_key = "compare_async_loop"
 
     def render(self, persona_id: Optional[uuid.UUID]) -> None:
         if not persona_id:
@@ -88,7 +91,7 @@ class ComparePage:
             self.user_id,
             persona_id,
         )
-        return asyncio.run(
+        return self._run_async(
             orchestrator.compare_companies(
                 company_a=company_a,
                 company_b=company_b,
@@ -167,4 +170,25 @@ class ComparePage:
 
         return [text]
 
+    def _run_async(self, coro):
+        loop = self._get_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result()
+
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        if self._loop_key in st.session_state:
+            loop = st.session_state[self._loop_key]
+            if not loop.is_closed():
+                return loop
+            st.session_state.pop(self._loop_key, None)
+
+        loop = asyncio.new_event_loop()
+
+        def _run_loop():
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+
+        threading.Thread(target=_run_loop, daemon=True).start()
+        st.session_state[self._loop_key] = loop
+        return loop
 

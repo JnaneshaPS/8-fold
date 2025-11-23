@@ -46,15 +46,10 @@ class LeadershipSummary(BaseModel):
     )
 
 
-def fetch_leadership(
+async def fetch_leadership(
     company_name: str,
     website: Optional[str] = None,
 ) -> LeadershipSummary:
-    """
-    Use Perplexity to find the most relevant leaders for sales/account planning.
-    (This step does NOT yet populate image_url.)
-    """
-
     ctx = f"Company: {company_name}"
     if website:
         ctx += f"\nWebsite: {website}"
@@ -74,25 +69,15 @@ Given:
 Return ONLY a JSON object matching the LeadershipSummary schema. No extra text.
 """
 
-    return ask_structured_perplexity(prompt, LeadershipSummary)
+    return await ask_structured_perplexity(prompt, LeadershipSummary)
 
 
 
 
 @function_tool
-def leadership_tool(
+async def leadership_tool(
     company_name: str,
     website: Optional[str] = None,
 ) -> str:
-    """
-    Fetch leadership information for a company.
-
-    Args:
-        company_name: Name of the company.
-        website: Optional website URL for disambiguation.
-
-    Returns:
-        JSON string matching LeadershipSummary.
-    """
-    result = fetch_leadership(company_name=company_name, website=website)
+    result = await fetch_leadership(company_name=company_name, website=website)
     return result.model_dump_json()

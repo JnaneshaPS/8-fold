@@ -107,16 +107,12 @@ class PersonaStrategyOutput(BaseModel):
     )
 
 
-def build_persona_strategy(
+async def build_persona_strategy(
     persona: PersonaContext,
     fundamentals: CompanyFundamentals,
     news: MarketNewsSummary,
     tech: TechServicesSummary,
 ) -> PersonaStrategyOutput:
-    """
-    Use Perplexity structured outputs to generate strategy sections.
-    """
-
     context_blob = json.dumps(
         {
             "persona": persona.model_dump(),
@@ -152,33 +148,21 @@ Be realistic and honest. If something is speculative, say so in the description.
 Return ONLY JSON matching the PersonaStrategyOutput schema. No extra commentary.
 """
 
-    return ask_structured_perplexity(prompt, PersonaStrategyOutput)
+    return await ask_structured_perplexity(prompt, PersonaStrategyOutput)
 
 
 @function_tool
-def persona_strategy_tool(
+async def persona_strategy_tool(
     persona: PersonaContext,
     fundamentals_json: str,
     news_json: str,
     tech_json: str,
 ) -> str:
-    """
-    Tool wrapper so the orchestrator agent can call strategy reasoning.
-
-    Args:
-        persona: PersonaContext describing the current user.
-        fundamentals_json: JSON string matching CompanyFundamentals.
-        news_json: JSON string matching MarketNewsSummary.
-        tech_json: JSON string matching TechServicesSummary.
-
-    Returns:
-        JSON string matching PersonaStrategyOutput.
-    """
     fundamentals = CompanyFundamentals.model_validate_json(fundamentals_json)
     news = MarketNewsSummary.model_validate_json(news_json)
     tech = TechServicesSummary.model_validate_json(tech_json)
 
-    result = build_persona_strategy(
+    result = await build_persona_strategy(
         persona=persona,
         fundamentals=fundamentals,
         news=news,

@@ -4,39 +4,34 @@ import json
 import uuid
 from dataclasses import dataclass
 import asyncio
+import logging
 from typing import Any, Dict, List, Optional
 
 from agents import Agent, Runner, function_tool, RunContextWrapper
 from pydantic import BaseModel, Field
 
 from backend.agents.fundamentals import (
-    fundamentals_tool,
     fetch_company_fundamentals,
     CompanyFundamentals,
 )
 from backend.agents.leadership import (
-    leadership_tool,
     fetch_leadership,
     LeadershipSummary,
 )
 from backend.agents.market_news import (
-    market_news_tool,
     fetch_market_news,
     MarketNewsSummary,
 )
 from backend.agents.tech_services import (
-    tech_services_tool,
     fetch_tech_and_services,
     TechServicesSummary,
 )
 from backend.agents.persona_strategy import (
-    persona_strategy_tool,
     build_persona_strategy,
     PersonaContext,
     PersonaStrategyOutput,
 )
 from backend.agents.visualization import (
-    stock_visualization_tool,
     get_stock_series,
     StockSeries,
 )
@@ -52,6 +47,7 @@ from backend.memory.mem0_client import (
     search_memory,
     MEM0_ENABLED,
 )
+from backend.mcp.exa_client import create_exa_web_search_tool
 
 
 @dataclass
@@ -132,37 +128,102 @@ class FullResearchReport(BaseModel):
     stock: Optional[StockSeries] = None
 
 
+def _strip_request(request: str) -> str:
+    text = request.strip()
+    lowered = text.lower()
+    if lowered.startswith("research "):
+        return text.split(" ", 1)[1].strip() or text
+    return text
+
+
+@function_tool(name_override="run_research_pipeline")
+async def run_research_pipeline_tool(
+    ctx: RunContextWrapper[SessionContext],
+    request: str,
+) -> str:
+    if not ctx.context.persona:
+        return "Persona not set"
+
+    company_name = _strip_request(request)
+
+    fundamentals, leadership, news, tech = await asyncio.gather(
+        fetch_company_fundamentals(company_name),
+        fetch_leadership(company_name),
+        fetch_market_news(company_name),
+        fetch_tech_and_services(company_name),
+    )
+
+    persona = ctx.context.persona
+    persona_ctx = PersonaContext(
+        id=str(persona.id),
+        name=persona.name,
+        role=persona.role or "",
+        company=persona.company or "",
+        region=persona.region,
+        focus_notes=persona.notes,
+    )
+
+    strategy = await build_persona_strategy(
+        persona_ctx,
+        fundamentals,
+        news,
+        tech,
+    )
+
+    stock = None
+    ticker = fundamentals.profile.stock_ticker
+    if ticker and fundamentals.profile.public_status == "public":
+        try:
+            stock = await get_stock_series(
+                symbol=ticker,
+                company_name=fundamentals.profile.company_name,
+            )
+        except Exception:
+            stock = None
+
+    report = FullResearchReport(
+        fundamentals=fundamentals,
+        leadership=leadership,
+        news=news,
+        tech_services=tech,
+        strategy=strategy,
+        stock=stock,
+    )
+
+    return report.model_dump_json()
+
+
+logger = logging.getLogger(__name__)
+
+
 class ResearchOrchestrator:
     def __init__(self, context: SessionContext):
         self.context = context
+        self._exa_tool = None
+        self._exa_tool_initialized = False
         self.agent = self._build_research_agent()
 
     def _build_research_agent(self) -> Agent[SessionContext]:
         instructions = """
-You are the Research Orchestrator for deep company research.
+You orchestrate research for B2B personas.
 
-Your job is to coordinate specialized tools to build a comprehensive research report:
-1. Call fundamentals_tool with the company name first
-2. Call leadership_tool, market_news_tool, and tech_services_tool 
-3. Call persona_strategy_tool with all gathered data to generate personalized insights
-4. If the company is public with a stock ticker, call stock_visualization_tool
+Workflow:
+1. Optionally call exa_web_search (MCP) to gather recent web snippets about the target company when the request lacks detail or you need confirmation.
+2. Call run_research_pipeline exactly once with the original user request (or cleaned company name). This returns the structured FullResearchReport JSON. Do not alter the JSON.
+3. Return the JSON output as-is (no commentary)."""
 
-Return all results in the FullResearchReport format with all required fields populated.
-"""
+        tools: List[Any] = [run_research_pipeline_tool]
+        exa_tool = self._get_exa_tool()
+        if exa_tool:
+            tools.append(exa_tool)
+        if MEM0_ENABLED:
+            tools.append(memory_lookup_tool)
 
         return Agent(
             name="Research Orchestrator",
             instructions=instructions,
             model="gpt-5-mini",
-            output_type=FullResearchReport,
-            tools=[
-                fundamentals_tool,
-                leadership_tool,
-                market_news_tool,
-                tech_services_tool,
-                persona_strategy_tool,
-                stock_visualization_tool,
-            ],
+            tools=tools,
         )
 
     async def run_full_research(
@@ -178,7 +239,16 @@ Return all results in the FullResearchReport format with all required fields pop
             raise ValueError("Research request cannot be empty")
 
         result = await Runner.run(self.agent, query, context=self.context)
-        report = result.final_output_as(FullResearchReport)
+
+        raw_output = result.final_output
+        if isinstance(raw_output, FullResearchReport):
+            report = raw_output
+        elif isinstance(raw_output, str):
+            report = FullResearchReport.model_validate_json(raw_output)
+        elif isinstance(raw_output, dict):
+            report = FullResearchReport.model_validate(raw_output)
+        else:
+            raise ValueError("Unexpected research output")
 
         if save_to_db:
             await self._save_report_to_db(report)
@@ -189,6 +259,17 @@ Return all results in the FullResearchReport format with all required fields pop
         )
 
         return report
+
+    def _get_exa_tool(self):
+        if self._exa_tool_initialized:
+            return self._exa_tool
+        self._exa_tool_initialized = True
+        try:
+            self._exa_tool = create_exa_web_search_tool(require_approval="never")
+        except Exception as exc:  # pragma: no cover - depends on env
+            logger.warning("EXA web search tool unavailable: %s", exc)
+            self._exa_tool = None
+        return self._exa_tool
 
     async def _save_report_to_db(self, report: FullResearchReport) -> None:
         with get_session() as db:
@@ -269,13 +350,11 @@ Recent context:
 
 You can:
 - Answer questions about companies, industries, and market trends
-- Provide quick summaries and insights
-- Help users understand their research targets
-- Suggest when to run a full Research Mode report
+- Always please response with a clear and concise manner, do not be verbose. 100% Humanied.
 {"- Call the memory_lookup tool whenever you need details from past research, comparisons, or previous conversations for this persona." if MEM0_ENABLED else ""}
 
 Be conversational, helpful, and concise. If the user asks for deep research on a company,
-suggest they use Research Mode for a complete structured report.
+suggest they use Research Mode for it.
 """
 
         tools = [memory_lookup_tool] if MEM0_ENABLED else []
@@ -547,4 +626,3 @@ class OrchestratorFactory:
             persona=persona,
         )
         return CompareOrchestrator(context)
-

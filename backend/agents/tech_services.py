@@ -58,14 +58,10 @@ class TechServicesSummary(BaseModel):
     )
 
 
-def fetch_tech_and_services(
+async def fetch_tech_and_services(
     company_name: str,
     website: Optional[str] = None,
 ) -> TechServicesSummary:
-    """
-    Use Perplexity to build 'Services / products' and 'Tech Stack' sections.
-    """
-
     ctx = f"Company: {company_name}"
     if website:
         ctx += f"\nWebsite: {website}"
@@ -86,25 +82,15 @@ Given:
 Return ONLY a JSON object that matches the TechServicesSummary schema.
 """
 
-    return ask_structured_perplexity(prompt, TechServicesSummary)
+    return await ask_structured_perplexity(prompt, TechServicesSummary)
 
 
 @function_tool
-def tech_services_tool(
+async def tech_services_tool(
     company_name: str,
     website: Optional[str] = None,
 ) -> str:
-    """
-    Fetch structured information on offerings and tech stack.
-
-    Args:
-        company_name: Name of the company.
-        website: Optional website.
-
-    Returns:
-        JSON string matching TechServicesSummary.
-    """
-    result = fetch_tech_and_services(
+    result = await fetch_tech_and_services(
         company_name=company_name,
         website=website,
     )

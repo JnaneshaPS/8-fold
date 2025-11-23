@@ -48,15 +48,11 @@ class MarketNewsSummary(BaseModel):
     )
 
 
-def fetch_market_news(
+async def fetch_market_news(
     company_name: str,
     website: Optional[str] = None,
     max_items: int = 6,
 ) -> MarketNewsSummary:
-    """
-    Use Perplexity to summarize latest news for the 'Latest news' section.
-    """
-
     ctx = f"Company: {company_name}"
     if website:
         ctx += f"\nWebsite: {website}"
@@ -77,9 +73,8 @@ Return ONLY a JSON object conforming to the MarketNewsSummary schema.
 Make sure you include at most {max_items} high-signal items.
 """
 
-    summary = ask_structured_perplexity(prompt, MarketNewsSummary)
+    summary = await ask_structured_perplexity(prompt, MarketNewsSummary)
 
-    # Optional: truncate items to max_items defensively
     if len(summary.items) > max_items:
         summary.items = summary.items[:max_items]
 
@@ -87,23 +82,12 @@ Make sure you include at most {max_items} high-signal items.
 
 
 @function_tool
-def market_news_tool(
+async def market_news_tool(
     company_name: str,
     website: Optional[str] = None,
     max_items: int = 6,
 ) -> str:
-    """
-    Fetch latest high-signal news items about a company.
-
-    Args:
-        company_name: Name of the company.
-        website: Optional website.
-        max_items: Max number of news entries to include.
-
-    Returns:
-        JSON string matching MarketNewsSummary.
-    """
-    result = fetch_market_news(
+    result = await fetch_market_news(
         company_name=company_name,
         website=website,
         max_items=max_items,

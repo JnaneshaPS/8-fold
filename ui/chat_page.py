@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import re
 import uuid
 from typing import Dict, List, Optional
+
+import asyncio
+import threading
 
 import streamlit as st
 
@@ -19,6 +21,7 @@ from backend.utils.company_parser import extract_companies as llm_extract_compan
 class ChatPage:
     def __init__(self, user_id: str):
         self.user_id = user_id
+        self._loop_key = "chat_async_loop"
 
     def render(self, persona_id: Optional[uuid.UUID]) -> None:
         if not persona_id:
@@ -119,14 +122,13 @@ class ChatPage:
             self.user_id,
             persona_id,
         )
-        with st.spinner(f"Comparing {company_a} vs {company_b}"):
-            result = self._run(
-                orch.compare_companies(
-                    company_a=company_a,
-                    company_b=company_b,
-                    use_cached=True,
-                )
+        result = self._run(
+            orch.compare_companies(
+                company_a=company_a,
+                company_b=company_b,
+                use_cached=True,
             )
+        )
         return self._format_compare_result(result)
 
     def _format_research_report(self, report: FullResearchReport) -> str:
@@ -304,5 +306,25 @@ class ChatPage:
         st.session_state[key].append({"role": role, "content": content})
 
     def _run(self, coro):
-        return asyncio.run(coro)
+        loop = self._get_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result()
 
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        if self._loop_key in st.session_state:
+            loop = st.session_state[self._loop_key]
+            if loop.is_closed():
+                st.session_state.pop(self._loop_key, None)
+            else:
+                return loop
+
+        loop = asyncio.new_event_loop()
+
+        def _run_loop():
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+
+        thread = threading.Thread(target=_run_loop, daemon=True)
+        thread.start()
+        st.session_state[self._loop_key] = loop
+        return loop
